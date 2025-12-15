@@ -1,10 +1,10 @@
 import requests
 import os
 import sys
-import random # 新增随机库
+import random
 from datetime import datetime, timedelta, date
 
-# ================= 1. 读取配置 =================
+# ================= 1. 配置读取 =================
 APP_ID = os.environ["APP_ID"]
 APP_SECRET = os.environ["APP_SECRET"]
 USER_ID_STRING = os.environ["USER_ID"] 
@@ -15,7 +15,7 @@ CITY_CODE = os.environ["CITY_CODE"]
 LOVE_START_DATE = os.environ["LOVE_START_DATE"]
 PET_START_DATE = os.environ["PET_START_DATE"]
 
-# ================= 2. 工具函数 =================
+# ================= 2. 核心函数 =================
 
 def get_beijing_time():
     """获取北京时间"""
@@ -24,12 +24,13 @@ def get_beijing_time():
     return beijing_now
 
 def get_weather():
-    """获取高德天气"""
+    """获取天气"""
     url = f"https://restapi.amap.com/v3/weather/weatherInfo?city={CITY_CODE}&key={WEATHER_KEY}&extensions=all"
     try:
         res = requests.get(url, timeout=5).json()
         if res["status"] == "1" and res["forecasts"]:
             today = res["forecasts"][0]["casts"][0]
+            # 获取湿度
             url_base = f"https://restapi.amap.com/v3/weather/weatherInfo?city={CITY_CODE}&key={WEATHER_KEY}&extensions=base"
             res_base = requests.get(url_base, timeout=5).json()
             humidity = "适宜"
@@ -46,39 +47,32 @@ def get_weather():
                 "city": res["forecasts"][0]["city"]
             }
     except Exception as e:
-        print(f"❌ 天气获取错误: {e}")
-    return None
+        print(f"❌ 天气获取失败: {e}")
+        return None
 
-def get_ciba():
-    """获取每日金句 (增强版)"""
-    # 备用金句库，如果接口挂了就用这里的
-    backups = [
-        ("Love represents a pleasant state of mind.", "爱代表一种令人愉悦的精神状态。"),
-        ("Where there is love, there are always miracles.", "哪里有爱，哪里就有奇迹。"),
-        ("You make my heart smile.", "你让我的心微笑。"),
-        ("To the world you may be one person, but to me you are the world.", "对于世界而言，你是一个人；但是对于我而言，你是整个世界。"),
-        ("Every day is a new beginning.", "每一天都是新的开始。")
-    ]
+def get_words():
+    """
+    获取每日一句 (合并英文和中文)
+    """
+    # 备用文案 (万一接口挂了，发这个，保证不留白)
+    default_en = "Everything will be alright."
+    default_ch = "一切都会好起来的。"
     
     try:
-        # 尝试使用 HTTPS 请求，设置5秒超时
+        # 尝试请求 API
         url = "https://open.iciba.com/dsapi/"
-        res = requests.get(url, timeout=5, verify=False).json() # verify=False忽略证书报错
-        content = res.get("content")
-        note = res.get("note")
+        res = requests.get(url, timeout=4, verify=False).json()
+        en = res.get("content", default_en)
+        ch = res.get("note", default_ch)
         
-        # 确保真的取到了文字
-        if content and note:
-            return content, note
-        else:
-            raise Exception("API返回空数据")
-            
+        # ✨ 重点在这里：把英文和中文拼起来，中间加个换行符 \n
+        return f"{en}\n{ch}"
+        
     except Exception as e:
-        print(f"⚠️ 金句接口报错: {e}，已切换为本地备用句。")
-        return random.choice(backups) # 随机返回一句
+        print(f"⚠️ 接口报错，使用备用文案: {e}")
+        return f"{default_en}\n{default_ch}"
 
 def calculate_days(start_date_str):
-    """计算天数"""
     try:
         today = get_beijing_time().date()
         start = datetime.strptime(start_date_str, "%Y-%m-%d").date()
@@ -87,22 +81,13 @@ def calculate_days(start_date_str):
         return 0
 
 def get_token():
-    """获取微信Token"""
-    try:
-        url = f"https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={APP_ID}&secret={APP_SECRET}"
-        res = requests.get(url, timeout=10).json()
-        return res.get("access_token")
-    except Exception as e:
-        print(f"❌ Token获取失败: {e}")
-        return None
+    url = f"https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={APP_ID}&secret={APP_SECRET}"
+    res = requests.get(url).json()
+    return res.get("access_token")
 
-# ================= 3. 发送主逻辑 =================
+# ================= 3. 发送逻辑 =================
 def send_msg(mode):
     token = get_token()
-    if not token:
-        print("❌ 无法获取Token，任务终止")
-        return
-
     beijing_now = get_beijing_time()
     today_str = beijing_now.strftime("%Y-%m-%d %A")
     
@@ -113,10 +98,12 @@ def send_msg(mode):
         print(">>> 正在准备早安数据...")
         template_id = TEMPLATE_MORNING
         weather = get_weather()
-        note_en, note_ch = get_ciba() # 这里调用了新的增强版函数
         
+        # 获取拼接好的句子
+        words_content = get_words() 
+
         if not weather:
-            print("❌ 天气获取失败，终止发送")
+            print("❌ 天气失败，停止")
             return
 
         data = {
@@ -130,18 +117,17 @@ def send_msg(mode):
             "humidity": {"value": weather["humidity"]},
             "love_days": {"value": calculate_days(LOVE_START_DATE)},
             "pet_days": {"value": calculate_days(PET_START_DATE)},
-            "note_en": {"value": note_en}, # 注意这里的变量名
-            "note_ch": {"value": note_ch}  # 必须和模板里的{{note_ch.DATA}}对应
+            
+            # 👇 这里就是新的变量名，对应模板里的 {{words.DATA}}
+            "words": {"value": words_content, "color": "#333333"} 
         }
         
     elif mode == "night":
         print(">>> 正在准备晚安数据...")
         template_id = TEMPLATE_NIGHT
-        data = {
-            "date": {"value": today_str}
-        }
+        data = {"date": {"value": today_str}}
 
-    # 循环发送
+    # 支持多用户发送
     user_list = USER_ID_STRING.split(",")
     url = f"https://api.weixin.qq.com/cgi-bin/message/template/send?access_token={token}"
     
@@ -154,16 +140,11 @@ def send_msg(mode):
             "template_id": template_id,
             "data": data
         }
-        
-        try:
-            res = requests.post(url, json=payload, timeout=10).json()
-            print(f"📤 发送给 [{user}] 结果: {res}")
-        except Exception as e:
-            print(f"❌ 发送给 [{user}] 失败: {e}")
+        res = requests.post(url, json=payload).json()
+        print(f"📤 发送给 [{user}] 结果: {res}")
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
-        mode = sys.argv[1] 
-        send_msg(mode)
+        send_msg(sys.argv[1])
     else:
-        print("❌ 错误：请指定模式 (morning/night)")
+        print("❌ 请指定参数: morning 或 night")
