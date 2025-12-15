@@ -1,7 +1,6 @@
 import requests
 import os
 import sys
-import random
 from datetime import datetime, timedelta, date
 
 # ================= 1. 配置读取 =================
@@ -50,28 +49,6 @@ def get_weather():
         print(f"❌ 天气获取失败: {e}")
         return None
 
-def get_words():
-    """
-    获取每日一句 (合并英文和中文)
-    """
-    # 备用文案 (万一接口挂了，发这个，保证不留白)
-    default_en = "Everything will be alright."
-    default_ch = "一切都会好起来的。"
-    
-    try:
-        # 尝试请求 API
-        url = "https://open.iciba.com/dsapi/"
-        res = requests.get(url, timeout=4, verify=False).json()
-        en = res.get("content", default_en)
-        ch = res.get("note", default_ch)
-        
-        # ✨ 重点在这里：把英文和中文拼起来，中间加个换行符 \n
-        return f"{en}\n{ch}"
-        
-    except Exception as e:
-        print(f"⚠️ 接口报错，使用备用文案: {e}")
-        return f"{default_en}\n{default_ch}"
-
 def calculate_days(start_date_str):
     try:
         today = get_beijing_time().date()
@@ -99,9 +76,6 @@ def send_msg(mode):
         template_id = TEMPLATE_MORNING
         weather = get_weather()
         
-        # 获取拼接好的句子
-        words_content = get_words() 
-
         if not weather:
             print("❌ 天气失败，停止")
             return
@@ -116,10 +90,8 @@ def send_msg(mode):
             "wind_class": {"value": weather["wind_class"]},
             "humidity": {"value": weather["humidity"]},
             "love_days": {"value": calculate_days(LOVE_START_DATE)},
-            "pet_days": {"value": calculate_days(PET_START_DATE)},
-            
-            # 👇 这里就是新的变量名，对应模板里的 {{words.DATA}}
-            "words": {"value": words_content, "color": "#333333"} 
+            "pet_days": {"value": calculate_days(PET_START_DATE)}
+            # 删除了 words 相关代码
         }
         
     elif mode == "night":
@@ -127,7 +99,7 @@ def send_msg(mode):
         template_id = TEMPLATE_NIGHT
         data = {"date": {"value": today_str}}
 
-    # 支持多用户发送
+    # 发送
     user_list = USER_ID_STRING.split(",")
     url = f"https://api.weixin.qq.com/cgi-bin/message/template/send?access_token={token}"
     
