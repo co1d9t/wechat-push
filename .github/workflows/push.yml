@@ -37,9 +37,17 @@ jobs:
           LOVE_START_DATE: ${{ secrets.LOVE_START_DATE }}
           PET_START_DATE: ${{ secrets.PET_START_DATE }}
         run: |
-          # 自动判断时间
+          # 获取当前 UTC 小时数
           HOUR=$(date -u +%H)
-          if [ $HOUR -lt 12 ]; then
+          
+          echo "Current UTC Hour: $HOUR"
+          
+          # 逻辑分析：
+          # 北京 07:30 = UTC 23:30 (HOUR=23) -> 应该发早安
+          # 北京 23:00 = UTC 15:00 (HOUR=15) -> 应该发晚安
+          
+          # 所以：如果 UTC 小时数大于 18 (即UTC 19点-23点)，那是北京的早上
+          if [ $HOUR -gt 18 ]; then
             python main.py morning
           else
             python main.py night
